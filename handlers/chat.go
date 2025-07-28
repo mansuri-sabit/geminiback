@@ -476,61 +476,116 @@ func IframeSendMessage(c *gin.Context) {
 // ===== AI RESPONSE GENERATION =====
 
 // generateAIResponse - Enhanced AI response generation for authenticated users
+// func generateAIResponse(userMessage, pdfContent, geminiKey, projectName, geminiModel string) (string, error) {
+//     ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+//     defer cancel()
+    
+//     client, err := genai.NewClient(ctx, option.WithAPIKey(geminiKey))
+//     if err != nil {
+//         return "", fmt.Errorf("failed to create Gemini client: %v", err)
+//     }
+//     defer client.Close()
+    
+//     // Use specified model or default
+//     modelName := geminiModel
+//     if modelName == "" {
+//         modelName = "gemini-1.5-flash"
+//     }
+    
+//     model := client.GenerativeModel(modelName)
+    
+//     // Configure model for better responses
+//     model.SetTemperature(0.85)
+//     model.SetTopP(0.9)
+//     model.SetTopK(40)
+    
+//     // Enhanced prompt with natural tone and anti-repetition
+//     prompt := fmt.Sprintf(`
+// You are a helpful AI assistant for %s. Respond naturally and conversationally without repeating phrases.
+
+// KNOWLEDGE BASE:
+// %s
+
+// USER QUESTION:
+// %s
+
+// GUIDELINES:
+// – Base the answer on the knowledge-base content when possible  
+// – Use a warm, friendly tone (avoid robotic phrases)  
+// – Keep it short: 2-3 well-formed sentences unless detail is essential  
+// – **Never** repeat any word, phrase, or sentence in the same reply  
+// – Vary your wording and sentence structure  
+// – If the docs don't contain the answer, say so politely and offer general help  
+// – End the reply naturally without filler or repetition.
+
+// Answer:`, projectName, pdfContent, userMessage)
+    
+//     resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+//     if err != nil {
+//         return "", fmt.Errorf("failed to generate content: %v", err)
+//     }
+    
+//     if len(resp.Candidates) > 0 && len(resp.Candidates[0].Content.Parts) > 0 {
+//         return fmt.Sprintf("%v", resp.Candidates[0].Content.Parts[0]), nil
+//     }
+    
+//     return "I'm sorry, I couldn't generate a response at the moment. Please try again.", nil
+// }
+
 func generateAIResponse(userMessage, pdfContent, geminiKey, projectName, geminiModel string) (string, error) {
     ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
     defer cancel()
-    
+
     client, err := genai.NewClient(ctx, option.WithAPIKey(geminiKey))
     if err != nil {
         return "", fmt.Errorf("failed to create Gemini client: %v", err)
     }
     defer client.Close()
-    
-    // Use specified model or default
-    modelName := geminiModel
-    if modelName == "" {
-        modelName = "gemini-1.5-flash"
+
+    if geminiModel == "" {
+        geminiModel = "gemini-1.5-flash"
     }
-    
-    model := client.GenerativeModel(modelName)
-    
-    // Configure model for better responses
+
+    model := client.GenerativeModel(geminiModel)
     model.SetTemperature(0.85)
     model.SetTopP(0.9)
     model.SetTopK(40)
-    
-    // Enhanced prompt with natural tone and anti-repetition
-    prompt := fmt.Sprintf(`
-You are a helpful AI assistant for %s. Respond naturally and conversationally without repeating phrases.
 
-KNOWLEDGE BASE:
+    // ✅ Refined prompt with assistant identity and tone control
+    prompt := fmt.Sprintf(`
+You are the official support assistant for "%s". Always speak confidently and professionally **as if you are a real human assistant working at this company**.
+
+DOCUMENT CONTEXT:
 %s
 
 USER QUESTION:
 %s
 
-GUIDELINES:
-– Base the answer on the knowledge-base content when possible  
-– Use a warm, friendly tone (avoid robotic phrases)  
-– Keep it short: 2-3 well-formed sentences unless detail is essential  
-– **Never** repeat any word, phrase, or sentence in the same reply  
-– Vary your wording and sentence structure  
-– If the docs don't contain the answer, say so politely and offer general help  
-– End the reply naturally without filler or repetition.
+RESPONSE RULES:
+– Respond as the company representative (do not mention AI or language model)
+– Base your reply on the document if possible. Otherwise, give a helpful fallback
+– Keep a warm, helpful, and human-like tone (avoid robotic/formal phrases)
+– Keep answers short: 2-3 complete and varied sentences unless explanation is needed
+– Do not repeat phrases or words unnecessarily
+– Never say "based on the document" or "I am an AI assistant"
+– Reply like a human would, with confidence, care, and clear communication
 
 Answer:`, projectName, pdfContent, userMessage)
-    
+
     resp, err := model.GenerateContent(ctx, genai.Text(prompt))
     if err != nil {
         return "", fmt.Errorf("failed to generate content: %v", err)
     }
-    
+
     if len(resp.Candidates) > 0 && len(resp.Candidates[0].Content.Parts) > 0 {
         return fmt.Sprintf("%v", resp.Candidates[0].Content.Parts[0]), nil
     }
-    
+
     return "I'm sorry, I couldn't generate a response at the moment. Please try again.", nil
 }
+
+
+
 
 // generateGeminiResponse - Enhanced response generation for embed users
 func generateGeminiResponse(project models.Project, userMessage, userIP string, user models.ChatUser) (string, error) {
@@ -563,25 +618,27 @@ func generateGeminiResponse(project models.Project, userMessage, userIP string, 
     }
     
     // Enhanced prompt with natural tone
-    prompt := fmt.Sprintf(`
-You are a helpful AI assistant for %s. %sRespond naturally and conversationally without repeating phrases.
+  // Refined, assistant-like prompt
+prompt := fmt.Sprintf(`You are the official customer support assistant for "%s". %s
+Always respond as if you are a real, human assistant working at the company.
+Never mention you're an AI or language model.
 
-KNOWLEDGE BASE:
+COMPANY KNOWLEDGE:
 %s
 
 USER QUESTION:
 %s
 
-GUIDELINES:
-– Base the answer on the knowledge-base content when possible  
-– Use a warm, friendly tone (avoid robotic phrases)  
-– Keep it short: 2-3 well-formed sentences unless detail is essential  
-– **Never** repeat any word, phrase, or sentence in the same reply  
-– Vary your wording and sentence structure  
-– If the docs don't contain the answer, say so politely and offer general help  
-– End the reply naturally without filler or repetition.
+RESPONSE RULES:
+- Speak like a human company support executive
+- Avoid robotic phrases, disclaimers, or repetitions
+- Give clear answers based on the company knowledge above
+- If an answer isn't found, respond politely and offer help
+- Use warm, natural tone and avoid saying "based on the document"
+- Keep it concise: 2–3 sentences max, unless more is needed
+- Always end smoothly — never with generic filler like "I hope this helps"
 
-Answer:`, project.Name, userContext, project.PDFContent, userMessage)
+Your reply:`, project.Name, userContext, project.PDFContent, userMessage)
 
     resp, err := model.GenerateContent(ctx, genai.Text(prompt))
     if err != nil {
