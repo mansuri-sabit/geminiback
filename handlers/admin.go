@@ -135,9 +135,7 @@ func CreateProject(c *gin.Context) {
         project.GeminiModel = "gemini-1.5-flash"
     }
     
-    if project.GeminiLimit == 0 {
-        project.GeminiLimit = 1000 // Default daily limit
-    }
+
     
     // Initialize arrays to prevent null values
     if project.PDFFiles == nil {
@@ -146,7 +144,7 @@ func CreateProject(c *gin.Context) {
     
     // Initialize analytics fields
     project.TotalQuestions = 0
-    project.GeminiUsage = 0
+
     project.LastUsed = time.Now()
     
     fmt.Printf("Project before insertion: %+v\n", project)
@@ -592,46 +590,6 @@ func ResetGeminiUsage(c *gin.Context) {
 
 
 
-// GetNotifications handles GET /api/admin/notifications
-func GetNotifications(c *gin.Context) {
-    // Sample notifications - replace with your database logic
-    notifications := []map[string]interface{}{
-        {
-            "id":         1,
-            "type":       "success",
-            "message":    "System backup completed successfully",
-            "time":       "2 min ago",
-            "created_at": time.Now().Add(-2 * time.Minute),
-        },
-        {
-            "id":         2,
-            "type":       "info",
-            "message":    "New user registered",
-            "time":       "5 min ago",
-            "created_at": time.Now().Add(-5 * time.Minute),
-        },
-        {
-            "id":         3,
-            "type":       "warning",
-            "message":    "High API usage detected",
-            "time":       "1 hour ago",
-            "created_at": time.Now().Add(-1 * time.Hour),
-        },
-        {
-            "id":         4,
-            "type":       "success",
-            "message":    "New project created successfully",
-            "time":       "3 hours ago",
-            "created_at": time.Now().Add(-3 * time.Hour),
-        },
-    }
-
-    c.JSON(http.StatusOK, gin.H{
-        "success":       true,
-        "notifications": notifications,
-    })
-}
-
 // GetRealtimeStats handles GET /api/admin/realtime-stats
 func GetRealtimeStats(c *gin.Context) {
     // Generate real-time statistics
@@ -749,9 +707,9 @@ func ToggleGeminiStatus(c *gin.Context) {
         "message": fmt.Sprintf("Gemini AI %s for project", status),
         "enabled": input.Enabled,
         "current_usage": gin.H{
-            "daily": project.GeminiUsageToday,
+        
             "monthly": project.GeminiUsageMonth,
-            "daily_limit": project.GeminiDailyLimit,
+    
             "monthly_limit": project.GeminiMonthlyLimit,
         },
     })
@@ -804,15 +762,13 @@ func GetGeminiAnalytics(c *gin.Context) {
         "usage": gin.H{
             "today": gin.H{
                 "count": todayCount,
-                "limit": project.GeminiDailyLimit,
-                "remaining": project.GeminiDailyLimit - int(todayCount),
-                "cost": project.EstimatedCostToday,
+
             },
             "month": gin.H{
                 "count": monthCount,
                 "limit": project.GeminiMonthlyLimit,
                 "remaining": project.GeminiMonthlyLimit - int(monthCount),
-                "cost": project.EstimatedCostMonth,
+        
             },
             "total_questions": project.TotalQuestions,
             "last_used": project.LastUsed,
@@ -875,3 +831,143 @@ func trackGeminiUsage(projectID primitive.ObjectID, question, response, model st
         projectCollection.UpdateOne(context.Background(), bson.M{"_id": projectID}, update)
     }
 }
+
+// File: handlers/admin.go
+
+// GetProjectsWithLimits - Enhanced admin projects view with monthly limits
+func GetProjectsWithLimits(c *gin.Context) {
+    collection := config.DB.Collection("projects")
+    
+    cursor, err := collection.Find(context.Background(), bson.M{})
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch projects"})
+        return
+    }
+
+    var projects []models.Project
+    if err := cursor.All(context.Background(), &projects); err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode projects"})
+        return
+    }
+
+    // Add usage percentage for each project
+    projectsWithStats := make([]gin.H, len(projects))
+    for i, project := range projects {
+        usagePercentage := 0.0
+        if project.GeminiMonthlyLimit > 0 {
+            usagePercentage = float64(project.GeminiUsageMonth) / float64(project.GeminiMonthlyLimit) * 100
+        }
+
+        projectsWithStats[i] = gin.H{
+            "id": project.ID,
+            "name": project.Name,
+            "description": project.Description,
+            "is_active": project.IsActive,
+            "gemini_enabled": project.GeminiEnabled,
+            "monthly_usage": project.GeminiUsageMonth,
+            "monthly_limit": project.GeminiMonthlyLimit,
+            "usage_percentage": usagePercentage,
+            "last_used": project.LastUsed,
+            "created_at": project.CreatedAt,
+        }
+    }
+
+    c.JSON(http.StatusOK, gin.H{
+        "success": true,
+        "projects": projectsWithStats,
+        "count": len(projects),
+    })
+}
+
+
+// SetMonthlyGeminiLimit - Admin sets monthly Gemini token limit for any project
+func SetMonthlyGeminiLimit(c *gin.Context) {
+    projectID := c.Param("id")
+    objID, err := primitive.ObjectIDFromHex(projectID)
+    if err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
+        return
+    }
+
+    var input struct {
+        MonthlyLimit int `json:"monthly_limit" binding:"required,min=0"`
+    }
+
+    if err := c.ShouldBindJSON(&input); err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{
+            "error": "Invalid input", 
+            "details": err.Error(),
+        })
+        return
+    }
+
+    // Update project with new monthly limit
+    collection := config.DB.Collection("projects")
+    update := bson.M{
+        "$set": bson.M{
+            "gemini_monthly_limit": input.MonthlyLimit,
+            "updated_at": time.Now(),
+        },
+    }
+
+    result, err := collection.UpdateOne(
+        context.Background(),
+        bson.M{"_id": objID},
+        update,
+    )
+
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update monthly limit"})
+        return
+    }
+
+    if result.MatchedCount == 0 {
+        c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+        return
+    }
+
+    c.JSON(http.StatusOK, gin.H{
+        "success": true,
+        "message": "Monthly Gemini limit updated successfully",
+        "project_id": projectID,
+        "monthly_limit": input.MonthlyLimit,
+    })
+}
+
+
+func ResetMonthlyUsage(c *gin.Context) {
+    projectID := c.Param("id")
+    objID, err := primitive.ObjectIDFromHex(projectID)
+    if err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project ID"})
+        return
+    }
+
+    collection := config.DB.Collection("projects")
+    update := bson.M{
+        "$set": bson.M{
+            "gemini_usage_month": 0,
+            "last_monthly_reset": time.Now(),
+            "updated_at": time.Now(),
+        },
+    }
+
+    _, err = collection.UpdateOne(
+        context.Background(),
+        bson.M{"_id": objID},
+        update,
+    )
+
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reset monthly usage"})
+        return
+    }
+
+    c.JSON(http.StatusOK, gin.H{
+        "success": true,
+        "message": "Monthly usage counter reset successfully",
+        "reset_date": time.Now(),
+    })
+}
+
+

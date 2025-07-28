@@ -6,7 +6,6 @@ import (
     "go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-
 // User represents a user in the system
 type User struct {
     ID        primitive.ObjectID `bson:"_id,omitempty" json:"id"`
@@ -44,29 +43,21 @@ type Project struct {
     PDFFiles        []PDFFile          `bson:"pdf_files" json:"pdf_files"`
     PDFContent      string             `bson:"pdf_content" json:"pdf_content"`
     
-    // Gemini Configuration
+    // Simplified Gemini Configuration
     GeminiEnabled   bool               `bson:"gemini_enabled" json:"gemini_enabled"`
     GeminiAPIKey    string             `bson:"gemini_api_key" json:"gemini_api_key"`
-    GeminiUsage     int                `bson:"gemini_usage" json:"gemini_usage"`
-    GeminiLimit     int                `bson:"gemini_limit" json:"gemini_limit"`
     GeminiModel     string             `bson:"gemini_model" json:"gemini_model"`
-    GeminiUsageToday    int       `bson:"gemini_usage_today" json:"gemini_usage_today"`
-    GeminiUsageMonth    int       `bson:"gemini_usage_month" json:"gemini_usage_month"`
-    GeminiDailyLimit    int       `bson:"gemini_daily_limit" json:"gemini_daily_limit"`
-    GeminiMonthlyLimit  int       `bson:"gemini_monthly_limit" json:"gemini_monthly_limit"`
-    LastDailyReset      time.Time `bson:"last_daily_reset" json:"last_daily_reset"`
-    LastMonthlyReset    time.Time `bson:"last_monthly_reset" json:"last_monthly_reset"`
-    EstimatedCostToday  float64   `bson:"estimated_cost_today" json:"estimated_cost_today"`
-    EstimatedCostMonth  float64   `bson:"estimated_cost_month" json:"estimated_cost_month"`
     
-    // Analytics
+    // Simplified Monthly Tracking (removed daily/cost fields)
+    GeminiUsageMonth    int       `bson:"gemini_usage_month" json:"gemini_usage_month"`
+    GeminiMonthlyLimit  int       `bson:"gemini_monthly_limit" json:"gemini_monthly_limit"`
+    LastMonthlyReset    time.Time `bson:"last_monthly_reset" json:"last_monthly_reset"`
+    
+    // Keep essential analytics
     TotalQuestions  int                `bson:"total_questions" json:"total_questions"`
     LastUsed        time.Time          `bson:"last_used" json:"last_used"`
-    
-    // Additional Fields for Enhanced Functionality
     WelcomeMessage  string             `bson:"welcome_message" json:"welcome_message"`
 }
-
 
 // PDFFile represents uploaded PDF files for each project
 type PDFFile struct {
@@ -97,7 +88,6 @@ type GeminiUsageLog struct {
     ResponseTime    int64              `bson:"response_time_ms" json:"response_time_ms"`
     Success         bool               `bson:"success" json:"success"`
 }
-
 
 // ChatMessage represents individual chat messages
 type ChatMessage struct {
@@ -133,6 +123,21 @@ type ChatSession struct {
     IPAddress string             `bson:"ip_address" json:"ip_address"`
 }
 
+type Notification struct {
+    ID          primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+    ProjectID   primitive.ObjectID `bson:"project_id,omitempty" json:"project_id,omitempty"`
+    UserID      primitive.ObjectID `bson:"user_id,omitempty" json:"user_id,omitempty"`
+    Type        string             `bson:"type" json:"type"` // "limit_expired", "success", "warning", "error", "info"
+    Title       string             `bson:"title" json:"title"`
+    Message     string             `bson:"message" json:"message"`
+    IsRead      bool               `bson:"is_read" json:"is_read"`
+    CreatedAt   time.Time          `bson:"created_at" json:"created_at"`
+    ExpiresAt   time.Time          `bson:"expires_at,omitempty" json:"expires_at,omitempty"`
+    Metadata    map[string]interface{} `bson:"metadata,omitempty" json:"metadata,omitempty"`
+}
+
+
+
 // ===== HELPER METHODS =====
 
 // IsAdmin checks if user has admin role
@@ -145,31 +150,31 @@ func (u *User) IsUser() bool {
     return u.Role == RoleUser
 }
 
-// Validate validates project data - FIXED METHOD
+// ✅ FIXED: Updated Validate method to use correct field names
 func (p *Project) Validate() error {
     if p.Name == "" {
         return fmt.Errorf("project name is required")
     }
-    if p.GeminiAPIKey == "" {  // ✅ FIXED: Use correct field name
+    if p.GeminiAPIKey == "" {
         return fmt.Errorf("gemini API key is required")
     }
-    if p.GeminiLimit <= 0 {
-        return fmt.Errorf("gemini usage limit must be greater than 0")
+    if p.GeminiMonthlyLimit <= 0 {  // ✅ FIXED: Use GeminiMonthlyLimit
+        return fmt.Errorf("gemini monthly limit must be greater than 0")
     }
     return nil
 }
 
-// IsWithinLimit checks if project is within Gemini usage limits
+// ✅ FIXED: Updated IsWithinLimit to use monthly fields
 func (p *Project) IsWithinLimit() bool {
-    return p.GeminiUsage < p.GeminiLimit
+    return p.GeminiUsageMonth < p.GeminiMonthlyLimit
 }
 
-// GetUsagePercentage returns usage as percentage
+// ✅ FIXED: Updated GetUsagePercentage to use monthly fields
 func (p *Project) GetUsagePercentage() float64 {
-    if p.GeminiLimit == 0 {
+    if p.GeminiMonthlyLimit == 0 {
         return 0
     }
-    return float64(p.GeminiUsage) / float64(p.GeminiLimit) * 100
+    return float64(p.GeminiUsageMonth) / float64(p.GeminiMonthlyLimit) * 100
 }
 
 // IsProcessed checks if PDF file is successfully processed
@@ -202,3 +207,10 @@ const (
     GeminiModelPro   = "gemini-1.5-pro"
 )
 
+const (
+    NotificationTypeLimitExpired = "limit_expired"
+    NotificationTypeSuccess      = "success"
+    NotificationTypeWarning      = "warning"
+    NotificationTypeError        = "error"
+    NotificationTypeInfo         = "info"
+)
